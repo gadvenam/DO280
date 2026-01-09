@@ -1,4 +1,5 @@
 1) Configure the Identity Provider for the Openshift.
+   
 ●​ Create an htpasswd Identity Provider with the name: htpass-ex280
 ●​ Create the secret for Identity provider users: htpass-idp-ex280
 ●​ Create the user accoun​ with password jobs123
@@ -6,6 +7,7 @@
 ●​ Create the user account collins with password collins123
 ●​ Create the user account adlerin with password adlerin123
 ●​ Create the user account armstrong with password armstrong123
+
 =============================================================================
 
 Step-by-Step Guide
