@@ -32,13 +32,13 @@ copy
     -b: Read the password from the command line (for scripts). In an interactive setting, you can omit this and you will be prompted.
 
 c) Add the remaining users to the same file: Notice we do not use the -c flag here, as it would overwrite the existing file.
-
+``
 htpasswd -B -b htpasswd-ex280 wozniak wozniak123
 htpasswd -B -b htpasswd-ex280 collins collins123
 htpasswd -B -b htpasswd-ex280 adlerin adlerin123
 htpasswd -B -b htpasswd-ex280 armstrong armstrong123
 copy
-
+``
 d) Verify the file contents:
 
 cat htpasswd-ex280
