@@ -46,7 +46,7 @@ project-request                   5 (5 blank)    3
 ### - make sure this template available as default request `new-project` template for users.
 
 ```
-oc get project.config
+oc get projects.config
 ```
 ### You must see like this output.
 ![image](https://github.com/user-attachments/assets/52509e7c-8897-4b7a-aa17-3415be4b46b0)
