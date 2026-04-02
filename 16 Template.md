@@ -77,6 +77,7 @@ metadata:
 spec: 
   projectRequestTemplate:          ## Added line
     name: project-request          ## Added line
+    namespace: openshift-config
 
 ```
 
