@@ -1,0 +1,1147 @@
+ 1. Configure an identity provider 
+Configure your OpenShift cluster to use an HTPasswd identity provider with 
+the following requirements: 
+
+● The name of the identity provider is ex280-htpasswd 
+● The name of the secret is ex280-idp-secret 
+● The user account armstrong is present and can log in with password 
+indiaco 
+●  The user account collins is present and can log in with password 
+verastar 
+● The user account aldrin is present and can log in with password moonhar 
+● The user account jobs is present and can log in with password eastiver 
+● The user account wozniak is present and can log in with password 
+glimpse 
+ANS:
+
+# First user: use -c to CREATE the file (only once!)
+htpasswd -c -B -b user.htpasswd armstrong indiaco
+
+# Remaining users: NO -c flag (append to existing file)
+htpasswd -B -b user.htpasswd collins verastar
+htpasswd -B -b user.htpasswd aldrin moonhar
+htpasswd -B -b user.htpasswd jobs eastiver
+htpasswd -B -b user.htpasswd wozniak glimpse
+
+cat user.htpasswd
+# Count lines — must show 5
+wc -l user.htpasswd
+oc create secret generic ex280-idp-secret \
+  --from-file=htpasswd=user.htpasswd \
+  -n openshift-config
+oc get secret ex280-idp-secret -n openshift-config
+oc get oauth cluster -o yaml > oauth.yaml
+cat oauth.yaml
+vi oauth.yaml
+apiVersion: config.openshift.io/v1
+kind: OAuth
+metadata:
+  name: cluster
+spec:
+  identityProviders:
+  - name: ex280-htpasswd          # <-- exact name required
+    mappingMethod: claim
+    type: HTPasswd
+    htpasswd:
+      fileData:
+        name: ex280-idp-secret    # <-- exact secret name required
+oc apply -f oauth.yaml
+# Watch pods restart (takes 1-3 minutes)
+watch oc get pods -n openshift-authentication
+oc get oauth cluster -o yaml
+# ⚠️ Correct syntax: -u for username, -p for password
+
+oc login -u armstrong -p indiaco
+oc login -u collins -p verastar
+oc login -u aldrin -p moonhar
+oc login -u jobs -p eastiver
+oc login -u wozniak -p glimpse
+# Switch back to admin
+oc login -u kubeadmin
+
+# List all users
+oc get users
+# Also check identities
+oc get identity
+
+===============================================================================
+.2. Configure cluster permission 
+Configure your OpenShift cluster to meet the following requirements: 
+● The user account jobs can perform cluster administration tasks 
+● The user account wozniak can create projects 
+● The user account wozniak cannot perform cluster administration tasks 
+● The user account armstrong cannot create projects 
+● The user account kubeadmin is not present. 
+
+Answer
+oc adm policy add-cluster-role-to-user cluster-admin jobs
+oc get clusterrolebinding | grep jobs
+# OR
+oc adm policy who-can get nodes | grep jobs
+# Remove self-provisioner role from the default group
+oc adm policy remove-cluster-role-from-group self-provisioner system:authenticated:oauth
+oc adm policy add-cluster-role-to-user self-provisioner wozniak
+oc get clusterrolebinding -o wide | grep Wozniak
+# Double check — wozniak should NOT appear here
+oc get clusterrolebinding cluster-admin -o yaml | grep Wozniak
+# First — confirm the secret exists
+oc get secret kubeadmin -n kube-system
+# Delete it (correct syntax!)
+oc delete secret kubeadmin -n kube-system
+oc login -u jobs -p indiaco
+# cluster-admin tasks — only admins can do these
+oc get nodes
+oc get clusterrolebindings
+oc get projects --all-namespaces
+oc login -u wozniak -p glimpse
+oc new-project wozniak-test
+# Still logged in as wozniak
+oc get nodes
+oc get clusterrolebindings
+oc login -u armstrong -p indiaco
+oc new-project armstrong-test
+# Login back as jobs (cluster-admin)
+oc login -u jobs -p indiaco
+# Confirm secret is gone
+oc get secret kubeadmin -n kube-system
+# Try to login as kubeadmin — should FAIL
+oc login -u kubeadmin -p <old-password>
+oc login -u jobs -p indiaco
+
+# See all cluster role bindings
+oc get clusterrolebinding -o wide | grep -E "jobs|wozniak|armstrong|self-provisioner|cluster-admin"
+
+===================================================================================================
+3. Configure project permissions 
+Configure your OpenShift cluster to meet the following requirements: 
+The following projects exist: 
+● apollo 
+● manhattan 
+● gemini 
+● bluebook 
+● titan 
+● The user account armstrong is an administrator for project apollo and 
+project gemini 
+● The user account wozniak can view project titan but not administer or 
+delete it 
+
+Answer:
+oc new-project apollo
+oc new-project manhattan
+oc new-project gemini
+oc new-project bluebook
+oc new-project titan
+
+oc get projects
+oc adm policy add-role-to-user admin armstrong -n apollo
+oc adm policy add-role-to-user admin armstrong -n gemini
+oc adm policy add-role-to-user view wozniak -n titan
+
+# Check armstrong's role in apollo
+oc get rolebinding -n apollo | grep armstrong
+
+# Check armstrong's role in gemini
+oc get rolebinding -n gemini | grep armstrong
+
+# Check wozniak's role in titan
+oc get rolebinding -n titan | grep Wozniak
+
+oc get projects | grep -E "apollo|manhattan|gemini|bluebook|titan"
+
+# Can armstrong create resources in apollo?
+oc auth can-i create deployment -n apollo --as armstrong
+# Expected: yes ✅
+
+oc auth can-i delete deployment -n apollo --as armstrong
+# Expected: yes ✅
+
+oc auth can-i '*' '*' -n apollo --as armstrong
+# Expected: yes ✅
+
+oc login -u armstrong -p indiaco
+
+oc project apollo
+# Expected: Now using project "apollo"
+
+oc get rolebindings -n apollo
+# Expected: armstrong listed with admin role ✅
+
+# Switch back to admin first
+oc login -u jobs -p indiaco
+
+oc auth can-i create deployment -n gemini --as armstrong
+# Expected: yes ✅
+
+oc auth can-i delete deployment -n gemini --as armstrong
+# Expected: yes ✅
+
+oc auth can-i '*' '*' -n gemini --as armstrong
+# Expected: yes ✅
+
+# wozniak can VIEW titan
+oc auth can-i get pods -n titan --as wozniak
+# Expected: yes ✅
+
+oc auth can-i list services -n titan --as wozniak
+# Expected: yes ✅
+
+# wozniak CANNOT administer titan
+oc auth can-i create deployment -n titan --as wozniak
+# Expected: no ✅
+
+oc auth can-i delete pods -n titan --as wozniak
+# Expected: no ✅
+
+oc auth can-i '*' '*' -n titan --as wozniak
+# Expected: no ✅
+
+=====================================================
+4. Configure groups 
+Configure your OpenShift cluster to meet the following requirements: 
+● The user account armstrong is a member of the commander group 
+● The user account collins is a member of the pilot group 
+● The user account aldrin is a member of the pilot group 
+● Members of the commander group have edit permission in the apollo 
+project 
+● Members of the pilot group have view permission in the apollo project 
+
+Answer:
+oc adm groups new commander
+oc adm groups add-users commander armstrong
+oc adm groups new pilot
+oc adm groups add-users pilot collins
+oc adm groups add-users pilot aldrin
+oc get groups
+# Detailed view of commander group
+oc describe group commander
+# Detailed view of pilot group
+oc describe group pilot
+# ✅ CORRECT: add-role-to-GROUP (not add-role-to-user!)
+oc adm policy add-role-to-group edit commander -n apollo
+# ✅ CORRECT: add-role-to-GROUP (not add-role-to-user!)
+oc adm policy add-role-to-group view pilot -n apollo
+oc get rolebinding -n apollo
+# Detailed check for commander group
+oc get rolebinding -n apollo -o wide | grep commander
+# Detailed check for pilot group
+oc get rolebinding -n apollo -o wide | grep pilot
+oc get group commander
+# Expected: commander   armstrong ✅
+
+oc describe group commander | grep armstrong
+# Expected: armstrong ✅
+oc get group pilot
+# Expected: pilot   collins, aldrin ✅
+
+oc describe group pilot | grep collins
+# Expected: collins ✅
+oc describe group pilot | grep aldrin
+# Expected: aldrin ✅
+# armstrong (commander member) should be able to EDIT
+oc auth can-i create deployment -n apollo --as armstrong
+# Expected: yes ✅
+
+oc auth can-i delete deployment -n apollo --as armstrong
+# Expected: yes ✅
+
+oc auth can-i create pods -n apollo --as armstrong
+# Expected: yes ✅
+
+# armstrong should NOT be able to do admin tasks
+oc auth can-i '*' '*' -n apollo --as armstrong
+# Expected: no ✅ (edit not admin)
+
+oc auth can-i delete project -n apollo --as armstrong
+# Expected: no ✅ (cannot delete project - edit only)
+oc login -u armstrong -p indiaco
+
+oc project apollo
+# Expected: Now using project "apollo" ✅
+
+# Create a test deployment (edit permission)
+oc create deployment test-deploy --image=nginx -n apollo
+# Expected: deployment.apps/test-deploy created ✅
+
+# Delete the test deployment (cleanup)
+oc delete deployment test-deploy -n apollo
+# Expected: deployment.apps/test-deploy deleted ✅
+
+# Cannot delete the project itself (not admin)
+oc delete project apollo
+# Expected: Forbidden ✅
+# Switch back to admin
+oc login -u jobs -p indiaco
+
+# collins (pilot member) CAN view
+oc auth can-i get pods -n apollo --as collins
+# Expected: yes ✅
+
+oc auth can-i list services -n apollo --as collins
+# Expected: yes ✅
+
+# collins CANNOT create/edit/delete
+oc auth can-i create deployment -n apollo --as collins
+# Expected: no ✅
+
+oc auth can-i delete pods -n apollo --as collins
+# Expected: no ✅
+
+# aldrin (pilot member) CAN view
+oc auth can-i get pods -n apollo --as aldrin
+# Expected: yes ✅
+
+# aldrin CANNOT create/edit/delete
+oc auth can-i create deployment -n apollo --as aldrin
+# Expected: no ✅
+===================================================================
+5.  Configure quotas 
+Configure your OpenShift cluster to use quotas in the manhattan project with the 
+following requirements: 
+● The name of the quota is ex280-quota 
+● The amount of memory consumed across all containers may not exceed 
+15Gi 
+● The total amount of CPU consumed across all containers may not exceed 
+2 full cores 
+● The maximum number of replication controllers does not exceed 3 
+● The maximum number of pods does not exceed 3 
+● The maximum number of services does not exceed 6 
+
+Answer:
+# Only run this if manhattan doesn't exist!
+oc new-project Manhattan
+oc project Manhattan
+oc create quota ex280-quota \
+  --hard=cpu=2,memory=15Gi,\
+replicationcontrollers=3,pods=3,services=6 \
+  -n Manhattan
+cat << 'EOF' > quota.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ex280-quota
+  namespace: manhattan
+spec:
+  hard:
+    cpu: "2"
+    memory: 15Gi
+    replicationcontrollers: "3"
+    pods: "3"
+    services: "6"
+EOF
+oc apply -f quota.yaml
+oc get quota -n Manhattan
+oc describe quota ex280-quota -n Manhattan
+oc get quota ex280-quota -n manhattan -o yaml
+
+oc project manhattan
+
+# Create a deployment with resource limits
+oc create deployment test-quota \
+  --image=nginx \
+  -n Manhattan
+
+oc set resources deployment test-quota \
+  --requests=cpu=100m,memory=256Mi \
+  -n Manhattan
+
+oc describe quota ex280-quota -n Manhattan
+
+# Try to scale beyond pod limit of 3
+oc scale deployment test-quota --replicas=5 -n manhattan
+
+# Check what happened
+oc get pods -n manhattan
+# Expected: Only 3 pods maximum created
+
+oc describe quota ex280-quota -n manhattan
+# Expected: pods Used = 3 (cannot exceed Hard = 3)
+
+# Check quota blocks excessive memory requests
+oc create deployment big-memory \
+  --image=nginx \
+  -n manhattan
+
+oc set resources deployment big-memory \
+  --requests=memory=20Gi \
+  -n manhattan
+
+# Check — should be blocked!
+oc get events -n manhattan | grep -i quota
+# Expected: exceeded quota message ✅
+oc delete deployment test-quota -n manhattan
+oc delete deployment big-memory -n manhattan
+
+# Verify quota back to 0 used
+oc describe quota ex280-quota -n Manhattan
+
+=====================================================================
+6.Configure and deploy a secure route Deploy an application called oxcart 
+securely in the project called area51  
+● The application has self-signed certificate available at 
+"/C=US/ST=NC/L=Raleigh/O=RedHat/OU=RHT/CN=oxcart.apps.ocp4.example.com" Use 
+newcert command to generate required tls objects, pass the subject as argument value 
+● The application should be reachable at the following url 
+https://oxcart.apps.ocp4.example.com  
+● Application produces a valid Output
+
+Answer:
+# Create project
+oc new-project area51
+# Verify you are in correct project
+oc project
+# Expected: Using project "area51" ✅
+# Deploy oxcart application
+oc new-app --name oxcart \
+  --image=nginx \
+  -n area51
+oc new-app --name oxcart \
+  --image=bitnami/nginx \
+  -n area51
+watch oc get pods -n area51
+oc get service -n area51
+
+# Step 1: Generate private key (2048 bit)
+openssl genrsa -out private.key 2048
+
+# Step 2: Generate Certificate Signing Request (CSR)
+openssl req -new \
+  -key private.key \
+  -out redhat.csr \
+  -subj "/C=US/ST=NC/L=Raleigh/O=RedHat/OU=RHT/CN=oxcart.apps.ocp4.example.com"
+
+# Step 3: Self-sign the certificate (valid 365 days)
+openssl x509 -req \
+  -in redhat.csr \
+  -signkey private.key \
+  -days 365 \
+  -out redhat.crt
+openssl x509 -in redhat.crt -text -noout | grep -E "Subject:|CN="
+# Check all 3 files exist
+ls -la private.key redhat.csr redhat.crt
+
+# Verify certificate content
+openssl x509 -in redhat.crt -noout -subject -dates
+# Verify key matches certificate
+openssl x509 -noout -modulus -in redhat.crt | md5sum
+openssl rsa -noout -modulus -in private.key | md5sum
+# Expected: BOTH md5sum values must be IDENTICAL ✅
+oc create route edge \
+  --service=oxcart \
+  --key=private.key \
+  --cert=redhat.crt \
+  --hostname=oxcart.apps.ocp4.example.com \
+  -n area51
+oc get route -n area51
+# Detailed route description
+oc describe route oxcart -n area51
+oc get all -n area51
+# Test HTTPS access
+curl -k https://oxcart.apps.ocp4.example.com
+# Test with verbose to see TLS details
+curl -kv https://oxcart.apps.ocp4.example.com 2>&1 | grep -E "subject|issuer|SSL|TLS|200"
+# Check the certificate on the route
+curl -kv https://oxcart.apps.ocp4.example.com 2>&1 | grep subject
+# Check route has TLS configured
+oc get route oxcart -n area51 -o yaml | grep -A5 tls:
+# HTTP should either redirect or be blocked
+curl -k https://oxcart.apps.ocp4.example.com
+========================================================================
+7. Deploy an application 
+Deploy the chart named redhat-movie in the project aeti-service from the 
+repository: http://helm.domain6.example.com/charts/ 
+You may use the telnet or nc commands to validate the deployment. 
+
+Answer:
+oc new-project aeti-service
+oc project
+# Expected: Using project "aeti-service" ✅
+helm version
+helm repo list
+helm repo add custom-repo \
+  http://helm.domain6.example.com/charts/
+helm repo list
+helm repo update
+# Search for redhat-movie chart
+helm search repo custom-repo
+# Get more details about the chart
+helm show chart custom-repo/redhat-movie
+helm install redhat-movie \
+  custom-repo/redhat-movie \
+  -n aeti-service
+helm list -n aeti-service
+# Detailed helm status
+helm status redhat-movie -n aeti-service
+oc get all -n aeti-service
+watch oc get pods -n aeti-service
+# Get full route details
+oc describe route redhat-movie -n aeti-service
+
+# If app runs on port 8080
+nc -zv $ROUTE 8080
+====================================================================
+8.  Configure a service account 
+Configure a service account in the apples project to meet the following 
+requirements: 
+● The name of the service account is ex280sa 
+● The service account allows pods to be run as any available use 
+
+Answer:
+oc new-project apples
+oc project
+# Expected: Using project "apples" ✅
+oc get all -n apples
+# Expected: No resources found ✅
+oc create serviceaccount ex280sa -n apples
+oc get serviceaccount -n apples
+# Detailed description
+oc describe serviceaccount ex280sa -n apples
+# ✅ CORRECT: -z requires service account NAME after it
+oc adm policy add-scc-to-user anyuid \
+  -z ex280sa \
+  -n apples
+# Method 1: Check who can use anyuid SCC
+oc adm policy who-can use scc/anyuid
+# Method 2: Describe the SCC
+oc describe scc anyuid | grep -A5 "Users:"
+# Method 3: Check role binding
+oc get rolebinding -n apples | grep anyuid
+oc get rolebinding \
+  system:openshift:scc:anyuid \
+  -n apples \
+  -o yaml
+oc get sa ex280sa -n apples
+# Check if ex280sa has anyuid SCC permission
+oc adm policy who-can use scc/anyuid | grep ex280sa
+cat << 'EOF' > test-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-anyuid
+  namespace: apples
+spec:
+  serviceAccountName: ex280sa
+  containers:
+  - name: test
+    image: nginx
+    securityContext:
+      runAsUser: 0
+EOF
+oc apply -f test-pod.yaml
+# Wait for pod to be running
+watch oc get pod test-anyuid -n apples
+# Verify pod is running as root (user 0)
+oc exec test-anyuid -n apples -- id
+# Test pod WITHOUT service account (should fail or run as restricted)
+cat << 'EOF' > test-pod-noSA.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-no-sa
+  namespace: apples
+spec:
+  containers:
+  - name: test
+    image: nginx
+    securityContext:
+      runAsUser: 0
+EOF
+oc apply -f test-pod-noSA.yaml
+oc get pod test-no-sa -n apples
+oc delete pod test-anyuid -n apples
+oc delete pod test-no-sa -n apples
+echo "=== PROJECT CHECK ==="
+oc get project apples
+
+echo "=== SERVICE ACCOUNT ==="
+oc get sa -n apples | grep ex280sa
+
+echo "=== SCC BINDING ==="
+oc adm policy who-can use scc/anyuid | grep ex280sa
+
+echo "=== ROLE BINDING ==="
+oc get rolebinding -n apples | grep anyuid
+
+echo "=== FULL SA DESCRIPTION ==="
+oc describe sa ex280sa -n apples
+========================================================================
+9.Deploy an application 
+Deploy the application called oranges in the apples project so that the following 
+conditions are true: 
+● The application uses the ex280sa service account 
+● No configuration components have been added or removed 
+● The application produces output.
+
+Answer:
+oc project apples
+oc project
+# Expected: Using project "apples" ✅
+# MUST verify SA exists before deploying!
+oc get sa -n apples
+# Only if missing from previous task!
+oc create serviceaccount ex280sa -n apples
+oc adm policy add-scc-to-user anyuid -z ex280sa -n apples
+oc get all -n apples
+oc new-app --name=oranges \
+  --image=nginx \
+  -n apples
+watch oc get pods -n apples
+# Document current state before any changes
+# Question says "No config components added or removed"
+oc get deployment oranges -n apples -o yaml
+# CORRECT command with namespace flag!
+oc set serviceaccount deployment oranges ex280sa -n apples
+# Method 1: Quick grep check
+oc get deployment oranges \
+  -n apples \
+  -o yaml | grep -i serviceaccount
+# Method 2: jsonpath check
+oc get deployment oranges \
+  -n apples \
+  -o jsonpath='{.spec.template.spec.serviceAccountName}'
+# Method 3: Full deployment description
+oc describe deployment oranges -n apples | grep -i "service account"
+# Deployment will restart pods after SA change
+watch oc get pods -n apples
+# Check if route already exists
+oc get route -n apples
+curl -kv <routeurl>
+==============================================================================
+10. Scale the Application manually #this will only asked in 4.14 
+● Scale an application called hydra in the project called lerna.  The hydra application 
+should be scaled to five times
+
+Answer:
+# Only create if missing!
+oc new-project lerna
+oc project lerna
+oc project
+# Expected: Using project "lerna" ✅
+oc get all -n lerna
+oc get deployment hydra -n lerna
+# More detailed view
+oc describe deployment hydra -n lerna | grep -i replica
+oc scale deployment hydra \
+  --replicas=5 \
+  -n lerna
+watch oc get pods -n lerna
+oc rollout status deployment hydra -n lerna
+oc get deployment hydra -n lerna
+oc get project lerna
+# Expected: lerna Active ✅
+oc get deployment hydra -n lerna
+# Expected: hydra deployment present ✅
+# Count running pods
+oc get pods -n lerna | grep hydra | grep Running | wc -l
+# Expected: 5 ✅
+# Check all pods are Ready 1/1
+oc get pods -n lerna -o wide
+echo "=== PROJECT CHECK ==="
+oc get project lerna
+
+echo "=== DEPLOYMENT STATUS ==="
+oc get deployment hydra -n lerna
+
+echo "=== REPLICA COUNT ==="
+oc get deployment hydra -n lerna \
+  -o jsonpath='{.spec.replicas}'
+echo " replicas configured"
+
+echo "=== ALL PODS ==="
+oc get pods -n lerna
+
+echo "=== POD COUNT ==="
+oc get pods -n lerna | grep Running | wc -l
+echo " pods running (should be 5)"
+
+echo "=== ROLLOUT STATUS ==="
+oc rollout status deployment hydra -n lerna
+
+echo "=== DESCRIBE DEPLOYMENT ==="
+oc describe deployment hydra -n lerna | grep Replicas
+==========================================================
+11.  Configure a Secret 
+● Configure a secret in the math project and the name of the secret should be magic.  
+● The secret should have following key value pairs ACCESS_STRING: 
+ASDA142hfh-gfrhhueo-erfdk345v 
+
+Answer:
+oc new-project math
+oc project math
+# Expected: Now using project "math" ✅
+oc project
+# Expected: Using project "math" ✅
+oc get all -n math
+# Expected: No resources found (clean project) ✅
+# Check no secrets exist yet (except default ones)
+oc get secret -n math
+oc create secret generic magic \
+  --from-literal=ACCESS_STRING=ASDA142hfh-gfrhhueo-erfdk345v \
+  -n math
+# First encode the value
+echo -n "ASDA142hfh-gfrhhueo-erfdk345v" | base64
+oc get secret -n math
+oc describe secret magic -n math
+oc get secret magic -n math -o yaml
+oc get secret magic -n math
+oc describe secret magic -n math | grep ACCESS_STRING
+# Wait for pod to run
+watch oc get pod test-secret -n math
+echo "=== PROJECT CHECK ==="
+oc get project math
+
+echo "=== SECRET EXISTS ==="
+oc get secret magic -n math
+
+echo "=== SECRET DETAILS ==="
+oc describe secret magic -n math
+
+echo "=== SECRET KEY CHECK ==="
+oc get secret magic -n math \
+  -o jsonpath='{.data}' | python3 -m json.tool
+
+echo "=== SECRET VALUE DECODED ==="
+oc get secret magic \
+  -n math \
+  -o jsonpath='{.data.ACCESS_STRING}' | base64 -d
+
+echo ""
+echo "=== FULL SECRET YAML ==="
+oc get secret magic -n math -o yaml
+=============================================================
+12.  Configure an application to use a secret 
+Configure the application called red in the math project with the following 
+requirements: 
+● The application uses the secret previously created called magic 
+● The secret defines an environment variable with name ACCESS_STRING 
+● The application output no longer displays: 
+Sorry, application is not configured correctly
+
+Answer:
+oc project math
+oc project
+# Expected: Using project "math" ✅
+oc get secret magic -n math
+# Verify secret has ACCESS_STRING key
+oc describe secret magic -n math
+# Decode and confirm value
+oc get secret magic \
+  -n math \
+  -o jsonpath='{.data.ACCESS_STRING}' | base64 -d
+# Expected: ASDA142hfh-gfrhhueo-erfdk345v ✅
+oc get all -n math
+# Specifically check deployment
+oc get deployment red -n math
+oc set env deployment/red \
+  --list \
+  -n math
+# Set env from secret — CORRECT command
+oc set env deployment/red \
+  --from=secret/magic \
+  -n math
+# Method 1: List env vars on deployment
+oc set env deployment/red \
+  --list \
+  -n math
+# Method 2: Check deployment YAML
+oc get deployment red \
+  -n math \
+  -o yaml | grep -A5 -i "envFrom\|secretRef\|magic"
+# Method 3: Grep for both magic AND ACCESS_STRING
+oc get deployment red \
+  -n math \
+  -o yaml | grep -i -E "magic|ACCESS_STRING|envFrom|secretRef"
+watch oc get pods -n math
+oc rollout status deployment/red -n math
+# Describe deployment
+oc describe deployment red -n math | grep -A3 "Environment Variables from"
+echo "=== PROJECT ==="
+oc project
+
+echo "=== SECRET EXISTS ==="
+oc get secret magic -n math
+
+echo "=== SECRET KEY ==="
+oc describe secret magic -n math | grep ACCESS_STRING
+
+echo "=== DEPLOYMENT CONFIG ==="
+oc describe deployment red -n math | \
+  grep -A3 "Environment Variables from"
+
+echo "=== POD ENV VAR ==="
+POD=$(oc get pod -n math -l app=red \
+  -o jsonpath='{.items[0].metadata.name}')
+oc exec $POD -n math -- printenv ACCESS_STRING
+
+echo "=== APP OUTPUT ==="
+ROUTE=$(oc get route red -n math \
+  -o jsonpath='{.spec.host}')
+curl -s http://$ROUTE
+
+echo "=== ERROR MESSAGE CHECK ==="
+curl -s http://$ROUTE | grep -i "sorry" \
+  && echo "❌ STILL BROKEN" \
+  || echo "✅ ERROR GONE - APP WORKING!"
+======================================================================
+13. Configure a network policy 
+Configure a network policy using the database and checker projects with the 
+following requirements: 
+● The database project has a network policy with the name 
+db-allow-mysql-conn based on pod selector label 
+network.openshift.io/policy-group 
+● Connections to the database project are restricted to deployments from the 
+checker project 
+● The network policy is filtered by: 
+○ Project selector using the team=devsecops label 
+○ Pod selector using the deployment=web-mysql label 
+● The application can establish a connection to port 3306/TCP 
+You can check your work by examining the logs in the checker project. 
+
+Answer:
+oc get projects | grep -E "database|checker"
+# Check ALL labels on pods in database namespace
+oc get pods -n database --show-labels
+# Check ALL labels on pods in checker namespace
+oc get pods -n checker --show-labels
+# Check namespace labels
+oc get namespace checker --show-labels
+# Add label to checker namespace if missing
+oc label namespace checker team=devsecops
+oc get namespace checker --show-labels
+# Expected: team=devsecops present ✅
+# Check if any network policies exist in database
+oc get networkpolicy -n database
+vim allow.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: db-allow-mysql-conn
+  namespace: database
+spec:
+  podSelector:
+    matchLabels:
+      network.openshift.io/policy-group: "" # Targets pods with this specific label in the DB project
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          team: devsecops
+      podSelector:
+        matchLabels:
+          deployment: web-mysql
+    ports:
+    - protocol: TCP
+      port: 3306
+  policyTypes:
+  - Ingress
+# Check YAML is valid
+cat allow.yaml
+oc apply -f allow.yaml
+oc get networkpolicy -n database
+oc describe networkpolicy \
+  db-allow-mysql-conn \
+  -n database
+oc get networkpolicy db-allow-mysql-conn \
+  -n database \
+  -o yaml
+oc get networkpolicy db-allow-mysql-conn -n database
+# Expected: db-allow-mysql-conn present ✅
+oc get namespace checker --show-labels | grep team=devsecops
+# Expected: team=devsecops ✅
+# Check checker project logs (as exam specifies!)
+oc get pods -n checker
+echo "=== PROJECTS EXIST ==="
+oc get projects | grep -E "database|checker"
+
+echo "=== NAMESPACE LABEL ==="
+oc get namespace checker --show-labels | grep team
+
+echo "=== DATABASE POD LABELS ==="
+oc get pods -n database --show-labels
+
+echo "=== NETWORK POLICY EXISTS ==="
+oc get networkpolicy -n database
+
+echo "=== NETWORK POLICY DETAILS ==="
+oc describe networkpolicy \
+  db-allow-mysql-conn \
+  -n database
+
+echo "=== CHECKER LOGS ==="
+oc logs \
+  $(oc get pod -n checker \
+  -o jsonpath='{.items[0].metadata.name}') \
+  -n checker
+
+echo "=== CONNECTION TEST ==="
+oc exec \
+  $(oc get pod -n checker \
+  -o jsonpath='{.items[0].metadata.name}') \
+  -n checker \
+  -- nc -zv \
+  mysql.database.svc.cluster.local 3306
+====================================================
+14. Deploy an application 
+Deploy the application called atlas in the mercury project so that the following conditions 
+are true: 
+● No configuration components have been added or removed 
+● The application produces output.
+
+Answer:
+# If project exists
+oc project mercury
+oc new-project mercury
+oc project
+# Expected: Using project "mercury" ✅
+oc get all -n mercury
+oc get pods -n mercury
+# Check events for memory issues
+oc get events -n mercury \
+  --sort-by='.lastTimestamp'
+oc get deployment atlas -n mercury -o yaml
+# Save current deployment config BEFORE changes
+oc get deployment atlas \
+  -n mercury \
+  -o yaml > atlas-backup.yaml
+
+cat atlas-backup.yaml
+oc edit deployment atlas -n mercury
+spec:
+  template:
+    spec:
+      containers:
+      - name: atlas
+        image: nginx
+        resources:
+          limits:
+            memory: 5Mi      ← TOO LOW - change to 1Gi
+          requests:
+            cpu: 100m
+            memory: 5Gi      ← TOO HIGH - change to 1Gi
+spec:
+  template:
+    spec:
+      containers:
+      - name: atlas
+        image: nginx
+        resources:
+          limits:
+            memory: 1Gi      ← Fixed ✅
+          requests:
+            cpu: 100m
+            memory: 1Gi      ← Fixed ✅
+watch oc get pods -n mercury
+oc rollout status deployment atlas -n mercury
+oc get pods -n mercury
+curl -s <route-url>
+====================================================================================
+16.  Configure Template  
+Configure your OpenShift cluster so that new projects are created with limits 
+using the following requirements: 
+● The name of the limit range is 
+PROJECT_NAME-limits 
+where PROJECT_NAME is the name of the project created using oc 
+new-project 
+● The amount of memory consumed by a single container is: 
+○ Minimum: 128Mi 
+○ Maximum: 1Gi 
+○ Default: 512Mi 
+○ Default request: 256Mi
+
+Answer:
+oc adm create-bootstrap-project-template \
+  -o yaml > project-template.yaml
+ls -la project-template.yaml
+# Expected: file exists ✅
+
+cat project-template.yaml
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  creationTimestamp: null
+  name: project-request
+objects:
+- apiVersion: project.openshift.io/v1
+  kind: Project
+  metadata:
+    annotations:
+      openshift.io/description: ${PROJECT_DESCRIPTION}
+      openshift.io/display-name: ${PROJECT_DISPLAYNAME}
+      openshift.io/requester: ${PROJECT_REQUESTING_USER}
+    creationTimestamp: null
+    name: ${PROJECT_NAME}
+  spec: {}
+  status: {}
+- apiVersion: rbac.authorization.k8s.io/v1
+  kind: RoleBinding
+  metadata:
+    creationTimestamp: null
+    name: admin
+    namespace: ${PROJECT_NAME}
+  roleRef:
+    apiGroup: rbac.authorization.k8s.io
+    kind: ClusterRole
+    name: admin
+  subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: ${PROJECT_ADMIN_USER}
+parameters:
+- name: PROJECT_NAME
+- name: PROJECT_DISPLAYNAME
+- name: PROJECT_DESCRIPTION
+- name: PROJECT_ADMIN_USER
+- name: PROJECT_REQUESTING_USER
+vim project-template.yaml
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  creationTimestamp: null
+  name: project-request
+objects:
+- apiVersion: project.openshift.io/v1
+  kind: Project
+  metadata:
+    annotations:
+      openshift.io/description: ${PROJECT_DESCRIPTION}
+      openshift.io/display-name: ${PROJECT_DISPLAYNAME}
+      openshift.io/requester: ${PROJECT_REQUESTING_USER}
+    creationTimestamp: null
+    name: ${PROJECT_NAME}
+  spec: {}
+  status: {}
+- apiVersion: rbac.authorization.k8s.io/v1
+  kind: RoleBinding
+  metadata:
+    creationTimestamp: null
+    name: admin
+    namespace: ${PROJECT_NAME}
+  roleRef:
+    apiGroup: rbac.authorization.k8s.io
+    kind: ClusterRole
+    name: admin
+  subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: ${PROJECT_ADMIN_USER}
+# ↓↓↓ ADD THIS ENTIRE SECTION ABOVE parameters ↓↓↓
+- apiVersion: v1
+  kind: LimitRange
+  metadata:
+    name: ${PROJECT_NAME}-limits
+    namespace: ${PROJECT_NAME}
+  spec:
+    limits:
+    - type: Container
+      min:
+        memory: 128Mi
+      max:
+        memory: 1Gi
+      default:
+        memory: 512Mi
+      defaultRequest:
+        memory: 256Mi
+# ↑↑↑ END OF NEW SECTION ↑↑↑
+parameters:
+- name: PROJECT_NAME
+- name: PROJECT_DISPLAYNAME
+- name: PROJECT_DESCRIPTION
+- name: PROJECT_ADMIN_USER
+- name: PROJECT_REQUESTING_USER
+
+# Check LimitRange section was added correctly
+cat project-template.yaml | grep -A20 "LimitRange"
+kind: LimitRange
+  metadata:
+    name: ${PROJECT_NAME}-limits    ← Correct naming ✅
+    namespace: ${PROJECT_NAME}      ← Correct namespace ✅
+  spec:
+    limits:
+    - type: Container
+      min:
+        memory: 128Mi               ← Minimum ✅
+      max:
+        memory: 1Gi                 ← Maximum ✅
+      default:
+        memory: 512Mi               ← Default limit ✅
+      defaultRequest:
+        memory: 256Mi               ← Default request ✅
+# Verify parameters section still exists
+cat project-template.yaml | grep -A10 "^parameters:"
+oc apply -f project-template.yaml \
+  -n openshift-config
+oc get template -n openshift-config
+# Detailed template check
+oc describe template project-request \
+  -n openshift-config
+oc edit projects.config.openshift.io cluster
+apiVersion: config.openshift.io/v1
+kind: Project
+metadata:
+  name: cluster
+spec: {}
+oc get projects.config.openshift.io cluster -o yaml
+# Watch API server pods restart to pick up new config
+watch oc get pods \
+  -n openshift-apiserver
+oc get template project-request \
+  -n openshift-config \
+  -o yaml | grep -A25 "LimitRange"
+# Create a test project
+oc new-project test-limits-project
+# Check LimitRange was automatically created
+oc get limitrange -n test-limits-project
+# Describe the limit range
+oc describe limitrange \
+  test-limits-project-limits \
+  -n test-limits-project
+# Create another test project to double-confirm
+oc new-project verify-template-works
+oc get limitrange -n verify-template-works
+oc describe limitrange \
+  verify-template-works-limits \
+  -n verify-template-works
+# Deploy a test pod WITHOUT specifying memory
+oc new-app --name=test-app \
+  --image=nginx \
+  -n test-limits-project
+# Wait for pod
+watch oc get pods -n test-limits-project
+==============================================================================
+17.  Create a cron job 
+Create a cron job with the following requirements: 
+● The cron job name is ipsum 
+● The cron job uses the image: 
+registry.domain6.example.com/library/job-runner:latest 
+● The cron job runs every minute 
+● The cron job successful job history limit is 10 
+● The cron job runs in a project called lorem 
+
+Answer:
+# Check if project exists first
+oc get project lorem
+oc project lorem
+# Expected: Now using project "lorem" ✅
+oc new-project lorem
+# Expected: Now using project "lorem" ✅
+oc project
+# Expected: Using project "lorem" ✅
+oc get all -n lorem
+# Expected: No resources found ✅
+
+# Step 1: Create basic cronjob
+oc create cronjob ipsum \
+  --image=registry.domain6.example.com/\
+library/job-runner:latest \
+  --schedule="* * * * *" \
+  -n lorem
+
+# Step 2: Edit to add history limit
+oc edit cronjob ipsum -n lorem
+oc get cronjob -n lorem
+oc describe cronjob ipsum -n lorem
+oc get cronjob ipsum -n lorem -o yaml
+# Verify YAML before applying
+cat cronjob.yaml
+=================================================
