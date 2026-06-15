@@ -6,7 +6,7 @@ the following requirements:
 ● The name of the secret is ex280-idp-secret 
 ● The user account armstrong is present and can log in with password 
 indiaco 
-●  The user account collins is present and can log in with password 
+●  The user account *collins* is present and can log in with password 
 verastar 
 ● The user account aldrin is present and can log in with password moonhar 
 ● The user account jobs is present and can log in with password eastiver 
