@@ -1080,7 +1080,10 @@ apiVersion: config.openshift.io/v1
 kind: Project
 metadata:
   name: cluster
-spec: {}
+spec:
+  projectRequestTemplate:
+    name: project-request
+wq!
 oc get projects.config.openshift.io cluster -o yaml
 # Watch API server pods restart to pick up new config
 watch oc get pods \
