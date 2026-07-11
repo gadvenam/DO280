@@ -17,3 +17,11 @@ io.netty.handler.proxy.ProxyConnectException: http, none, serverswg.sbi.co.in/10
 ===================================================================================================
 [2026-07-10T19:46:43.596Z] "POST /api/transaction/v1/upi/sbi/txn/status HTTP/1.1" 503 URX,UF upstream_reset_before_response_started{remote_connection_failure|delayed_connect_error:_Connection_refused} - "delayed_connect_error:_Connection_refused" 127 190 72 - "10.251.32.225,10.177.82.22,172.16.24.2" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36" "508850ce-f10e-4ce5-87f7-4ec74a9eb349" "sbiepay.sbi.bank.in" "172.16.34.13:9092" inbound|9092|| - 172.16.34.13:9092 172.16.24.2:0 outbound_.9092_._.txn-transactionservice.prod-dr-transaction.svc.cluster.local default
 [2026-07-10T19:46:43.907Z] "POST /api/transaction/v1/upi/sbi/txn/status HTTP/1.1" 503 URX,UF upstream_reset_before_response_started{remote_connection_failure|delayed_connect_error:_Connection_refused} - "delayed_connect_error:_Connection_refused" 127 190 60 - "10.251.32.225,10.177.82.22,172.16.24.2" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36" "d955bb44-61a6-4351-8547-0cab9d24ce9a" "sbiepay.sbi.bank.in" "172.16.34.13:9092" inbound|9092|| - 172.16.34.13:9092 172.16.24.2:0 outbound_.9092_._.txn-transactionservice.prod-dr-transaction.svc.cluster.local default
+
+________________________________________reports_____________________
+Root Causes (Short Summary)
+
+RC1 – Inbound 503s (ports 9092/9093): Istio sidecar routed traffic to app pods before the app was actually listening (connection refused). Likely readiness probe firing too early during pod restart/startup.
+RC2 – Outbound failures to SBI/Wibmo: DNS resolution failed for tokenvault-sbi.wibmo.com via the SBI proxy (serverswg.sbi.co.in:9090), causing timeouts on UPI status & card auth calls. This is the main cause of transaction failures.
+
+Fix: Tune readiness/startup probes (RC1) + verify Istio egress ServiceEntry for wibmo.com/sbi.co.in and check with SBI/Wibmo on DNS/connectivity (RC2).
