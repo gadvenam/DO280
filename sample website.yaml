@@ -26,3 +26,5 @@ spec:
 
 oc expose deployment pyhon
 oc expose svc python
+
+x-forwarded chack client ip application
