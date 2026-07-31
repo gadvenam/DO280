@@ -21,3 +21,8 @@ spec:
         - containerPort: 8000
           name: http
         imagePullPolicy: Always
+
+
+
+oc expose deployment pyhon
+oc expose svc python
